@@ -83,6 +83,7 @@ describe('OrdersService', () => {
   const mockOrderQbForOrderNumber = {
     select: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
     getRawOne: jest.fn().mockResolvedValue({ maxn: null }),
   };
 
@@ -138,6 +139,7 @@ describe('OrdersService', () => {
     createQueryBuilder: jest.fn(() => ({
       select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ maxn: null }),
     })),
   };

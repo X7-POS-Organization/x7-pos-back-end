@@ -41,7 +41,7 @@ export class CreateOnlinePaymentDto {
     { message: 'Amount must be a number with up to 2 decimal places' },
   )
   @IsNotEmpty({ message: 'Amount is required' })
-  @Min(0, { message: 'Amount must be greater than or equal to 0' })
+  @Min(0.01, { message: 'Amount must be greater than 0' })
   @Max(9999999999.99, {
     message: 'Amount exceeds maximum decimal precision (12, 2)',
   })

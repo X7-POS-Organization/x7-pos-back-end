@@ -219,7 +219,7 @@ describe('OnlinePaymentService', () => {
         BadRequestException,
       );
       await expect(service.create(dtoWithNegativeAmount, 1)).rejects.toThrow(
-        'Amount must be greater than or equal to 0',
+        'Amount must be greater than 0',
       );
     });
 

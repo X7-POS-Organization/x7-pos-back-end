@@ -118,6 +118,14 @@ export class KitchenOrderSyncService {
         continue;
       }
       const lineStatus = preparationToOrderLineStatus(koi.preparation_status);
+      if (lineStatus === OrderItemKitchenStatus.READY) {
+        const existingOi = await manager
+          .getRepository(OrderItem)
+          .findOne({ where: { id: koi.order_item_id } });
+        if (existingOi?.kitchen_status === OrderItemKitchenStatus.SERVED) {
+          continue;
+        }
+      }
       await manager.getRepository(OrderItem).update(koi.order_item_id, {
         kitchen_status: lineStatus,
       });

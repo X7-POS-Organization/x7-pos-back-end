@@ -67,10 +67,8 @@ export class OnlinePaymentService {
       );
     }
 
-    if (createOnlinePaymentDto.amount < 0) {
-      throw new BadRequestException(
-        'Amount must be greater than or equal to 0',
-      );
+    if (createOnlinePaymentDto.amount <= 0) {
+      throw new BadRequestException('Amount must be greater than 0');
     }
 
     const normalizedProvider = createOnlinePaymentDto.paymentProvider.trim();
@@ -689,17 +687,44 @@ export class OnlinePaymentService {
     }
 
     const isFullRefund = Math.abs(requestedRefund - currentAmount) < 0.001;
-    existingOnlinePayment.status = OnlineOrderPaymentStatus.REFUNDED;
-    existingOnlinePayment.processed_at = new Date();
+    const now = new Date();
+    let saved: OnlinePayment;
 
-    const saved = await this.onlinePaymentRepository.save(
-      existingOnlinePayment,
-    );
+    if (isFullRefund) {
+      existingOnlinePayment.status = OnlineOrderPaymentStatus.REFUNDED;
+      existingOnlinePayment.processed_at = now;
+      saved = await this.onlinePaymentRepository.save(existingOnlinePayment);
 
-    if (existingOnlinePayment.onlineOrder) {
-      existingOnlinePayment.onlineOrder.payment_status =
-        OnlineOrderPaymentStatus.REFUNDED;
-      await this.onlineOrderRepository.save(existingOnlinePayment.onlineOrder);
+      if (existingOnlinePayment.onlineOrder) {
+        existingOnlinePayment.onlineOrder.payment_status =
+          OnlineOrderPaymentStatus.REFUNDED;
+        await this.onlineOrderRepository.save(
+          existingOnlinePayment.onlineOrder,
+        );
+      }
+    } else {
+      const remainingAmount =
+        Math.round((currentAmount - requestedRefund) * 100) / 100;
+      const refundAmountRounded = Math.round(requestedRefund * 100) / 100;
+
+      existingOnlinePayment.amount = remainingAmount;
+      await this.onlinePaymentRepository.save(existingOnlinePayment);
+
+      const refundSuffix = `_ref_${Date.now()}`;
+      const baseTxn = existingOnlinePayment.transaction_id.slice(
+        0,
+        100 - refundSuffix.length,
+      );
+      const refundRecord = new OnlinePayment();
+      refundRecord.online_order_id = existingOnlinePayment.online_order_id;
+      refundRecord.payment_provider = existingOnlinePayment.payment_provider;
+      refundRecord.transaction_id = `${baseTxn}${refundSuffix}`;
+      refundRecord.amount = refundAmountRounded;
+      refundRecord.status = OnlineOrderPaymentStatus.REFUNDED;
+      refundRecord.processed_at = now;
+      refundRecord.logical_status = OnlinePaymentStatus.ACTIVE;
+      refundRecord.onlineOrder = existingOnlinePayment.onlineOrder;
+      saved = await this.onlinePaymentRepository.save(refundRecord);
     }
 
     const reasonText = refundDto.reason?.trim()
