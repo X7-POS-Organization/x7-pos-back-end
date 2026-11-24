@@ -10,6 +10,16 @@ export class ReceiptResponseDto {
   @ApiProperty({ example: 200 })
   order_id: number;
 
+  @ApiProperty({ example: 1 })
+  merchant_id: number;
+
+  @ApiProperty({
+    example: 'INV-000001',
+    nullable: true,
+    description: 'Invoice number, unique per merchant',
+  })
+  invoice_number: string | null;
+
   @ApiProperty({ example: ReceiptType.INVOICE, enum: ReceiptType })
   type: ReceiptType;
 
@@ -34,6 +44,36 @@ export class ReceiptResponseDto {
 
   @ApiProperty({ example: 'USD' })
   currency: string;
+
+  @ApiProperty({
+    example: true,
+    description: 'false when the receipt was logically deleted',
+  })
+  is_active: boolean;
+
+  @ApiProperty({
+    example: false,
+    description: 'true when the receipt is fiscally locked',
+  })
+  is_locked: boolean;
+
+  @ApiProperty({
+    example: 7,
+    nullable: true,
+    required: false,
+    description:
+      'User that fiscally locked (processed) the receipt; set on the lock transition',
+  })
+  processed_by_user_id?: number | null;
+
+  @ApiProperty({
+    example: 'merchant_admin',
+    nullable: true,
+    required: false,
+    description:
+      'Role of the user that fiscally locked (processed) the receipt',
+  })
+  processed_by_role?: string | null;
 
   @ApiProperty({ example: '2024-01-15T08:00:00Z' })
   created_at: Date;
