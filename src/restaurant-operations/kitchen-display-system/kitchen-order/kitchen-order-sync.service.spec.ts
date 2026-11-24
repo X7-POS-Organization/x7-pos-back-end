@@ -28,6 +28,7 @@ describe('KitchenOrderSyncService', () => {
     },
   };
   const mockOrderItemRepo = {
+    findOne: jest.fn().mockResolvedValue(null),
     update: jest.fn(),
   };
   const mockOnlineOrderItemRepo = {
@@ -77,6 +78,7 @@ describe('KitchenOrderSyncService', () => {
 
     service = module.get(KitchenOrderSyncService);
     jest.clearAllMocks();
+    mockOrderItemRepo.findOne.mockResolvedValue(null);
   });
 
   it('should be defined', () => {

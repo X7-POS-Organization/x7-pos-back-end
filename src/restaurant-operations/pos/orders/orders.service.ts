@@ -1839,6 +1839,7 @@ export class OrdersService {
       .createQueryBuilder('o')
       .select('MAX(CAST(o.order_number AS INTEGER))', 'maxn')
       .where('o.merchant_id = :mid', { mid: merchantId })
+      .andWhere("o.order_number ~ '^[0-9]{1,9}$'")
       .getRawOne<{ maxn: string | null }>();
 
     const n = raw?.maxn != null && raw.maxn !== '' ? parseInt(raw.maxn, 10) : 0;

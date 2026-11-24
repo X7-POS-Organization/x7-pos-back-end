@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -31,6 +32,22 @@ import { OrderItem } from '../../../restaurant-operations/pos/order-item/entitie
 import { OrderItemStatus } from '../../../restaurant-operations/pos/order-item/constants/order-item-status.enum';
 import { KitchenOrderItem } from '../../../restaurant-operations/kitchen-display-system/kitchen-order-item/entities/kitchen-order-item.entity';
 import { KitchenOrderItemStatus } from '../../../restaurant-operations/kitchen-display-system/kitchen-order-item/constants/kitchen-order-item-status.enum';
+import { KitchenOrderItemPreparationStatus } from '../../../restaurant-operations/kitchen-display-system/kitchen-order-item/constants/kitchen-order-item-preparation-status.enum';
+import { KitchenOrderSyncService } from '../../../restaurant-operations/kitchen-display-system/kitchen-order/kitchen-order-sync.service';
+
+function orderLineToPreparationStatus(
+  status: OrderItemKitchenStatus,
+): KitchenOrderItemPreparationStatus {
+  switch (status) {
+    case OrderItemKitchenStatus.IN_PREPARATION:
+      return KitchenOrderItemPreparationStatus.IN_PREPARATION;
+    case OrderItemKitchenStatus.READY:
+    case OrderItemKitchenStatus.SERVED:
+      return KitchenOrderItemPreparationStatus.READY;
+    default:
+      return KitchenOrderItemPreparationStatus.PENDING;
+  }
+}
 
 @Injectable()
 export class OnlineOrderItemService {
@@ -44,6 +61,8 @@ export class OnlineOrderItemService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(Variant)
     private readonly variantRepository: Repository<Variant>,
+    @Optional()
+    private readonly kitchenOrderSyncService?: KitchenOrderSyncService,
   ) {}
 
   async create(
@@ -396,7 +415,7 @@ export class OnlineOrderItemService {
       );
     }
 
-    const existingOnlineOrderItem = await this.onlineOrderItemRepository
+    const qb = this.onlineOrderItemRepository
       .createQueryBuilder('onlineOrderItem')
       .leftJoinAndSelect('onlineOrderItem.onlineOrder', 'onlineOrder')
       .leftJoinAndSelect('onlineOrderItem.product', 'product')
@@ -411,17 +430,24 @@ export class OnlineOrderItemService {
       .andWhere('store.status = :status', { status: OnlineStoreStatus.ACTIVE })
       .andWhere('onlineOrder.status != :deletedStatus', {
         deletedStatus: OnlineOrderStatus.DELETED,
-      })
-      .andWhere('onlineOrderItem.status != :itemDeletedStatus', {
+      });
+
+    if (updateOnlineOrderItemDto.status !== OnlineOrderItemStatus.ACTIVE) {
+      qb.andWhere('onlineOrderItem.status != :itemDeletedStatus', {
         itemDeletedStatus: OnlineOrderItemStatus.DELETED,
-      })
-      .getOne();
+      });
+    }
+
+    const existingOnlineOrderItem = await qb.getOne();
 
     if (!existingOnlineOrderItem) {
       throw new NotFoundException('Online order item not found');
     }
 
-    if (existingOnlineOrderItem.status === OnlineOrderItemStatus.DELETED) {
+    if (
+      existingOnlineOrderItem.status === OnlineOrderItemStatus.DELETED &&
+      updateOnlineOrderItemDto.status !== OnlineOrderItemStatus.ACTIVE
+    ) {
       throw new ConflictException('Cannot update a deleted online order item');
     }
 
@@ -565,12 +591,31 @@ export class OnlineOrderItemService {
         existingOnlineOrderItem.order_item_id &&
         updateOnlineOrderItemDto.kitchenLineStatus !== undefined
       ) {
+        const nextLineStatus =
+          updateOnlineOrderItemDto.kitchenLineStatus as OrderItemKitchenStatus;
         await queryRunner.manager.update(
           OrderItem,
           existingOnlineOrderItem.order_item_id,
           {
-            kitchen_status:
-              updateOnlineOrderItemDto.kitchenLineStatus as OrderItemKitchenStatus,
+            kitchen_status: nextLineStatus,
+          },
+        );
+        const nextPrepStatus = orderLineToPreparationStatus(nextLineStatus);
+        const now = new Date();
+        await queryRunner.manager.update(
+          KitchenOrderItem,
+          {
+            order_item_id: existingOnlineOrderItem.order_item_id,
+            status: KitchenOrderItemStatus.ACTIVE,
+          },
+          {
+            preparation_status: nextPrepStatus,
+            ...(nextPrepStatus ===
+            KitchenOrderItemPreparationStatus.IN_PREPARATION
+              ? { started_at: now, completed_at: null }
+              : nextPrepStatus === KitchenOrderItemPreparationStatus.READY
+                ? { completed_at: now }
+                : { started_at: null, completed_at: null }),
           },
         );
       }
@@ -626,6 +671,33 @@ export class OnlineOrderItemService {
 
     if (!completeOnlineOrderItem) {
       throw new NotFoundException('Online order item not found after update');
+    }
+
+    if (
+      existingOnlineOrderItem.order_item_id &&
+      (updateOnlineOrderItemDto.kitchenLineStatus !== undefined ||
+        updateOnlineOrderItemDto.status !== undefined) &&
+      completeOnlineOrderItem.onlineOrder?.order_id
+    ) {
+      await this.kitchenOrderSyncService?.syncPosOrderFromKitchenOrders(
+        completeOnlineOrderItem.onlineOrder.order_id,
+      );
+      if (
+        updateOnlineOrderItemDto.kitchenLineStatus ===
+        OrderItemKitchenStatus.SERVED
+      ) {
+        await this.dataSource
+          .getRepository(OrderItem)
+          .update(existingOnlineOrderItem.order_item_id, {
+            kitchen_status: OrderItemKitchenStatus.SERVED,
+          });
+        await this.onlineOrderItemRepository.update(
+          completeOnlineOrderItem.id,
+          { kitchen_line_status: OrderItemKitchenStatus.SERVED },
+        );
+        completeOnlineOrderItem.kitchen_line_status =
+          OrderItemKitchenStatus.SERVED;
+      }
     }
 
     return {
@@ -709,6 +781,15 @@ export class OnlineOrderItemService {
       throw e;
     } finally {
       await queryRunner.release();
+    }
+
+    if (
+      existingOnlineOrderItem.order_item_id &&
+      existingOnlineOrderItem.onlineOrder?.order_id
+    ) {
+      await this.kitchenOrderSyncService?.syncPosOrderFromKitchenOrders(
+        existingOnlineOrderItem.onlineOrder.order_id,
+      );
     }
 
     return {

@@ -78,19 +78,33 @@ export class OnlineOrderSimulatorController {
       );
 
       // 3. Clear POS orders generated from online orders
+      const childOrderTables = [
+        'loyalty_point_transactions',
+        'loyalty_rewards_redemptions',
+        'marketing_coupon_redemptions',
+        'loyalty_coupons',
+        'tips',
+        'delivery_assignments',
+        'qr_order',
+        'order_item',
+      ];
       if (posOrderIds.length > 0) {
-        await this.dataSource.query(
-          `DELETE FROM order_item WHERE order_id = ANY($1);`,
-          [posOrderIds],
-        );
+        for (const tbl of childOrderTables) {
+          await this.dataSource.query(
+            `DELETE FROM ${tbl} WHERE order_id = ANY($1);`,
+            [posOrderIds],
+          );
+        }
         await this.dataSource.query(`DELETE FROM orders WHERE id = ANY($1);`, [
           posOrderIds,
         ]);
       }
-      await this.dataSource.query(
-        `DELETE FROM order_item WHERE order_id IN (SELECT id FROM orders WHERE merchant_id = $1 AND source = 'online');`,
-        [merchantId],
-      );
+      for (const tbl of childOrderTables) {
+        await this.dataSource.query(
+          `DELETE FROM ${tbl} WHERE order_id IN (SELECT id FROM orders WHERE merchant_id = $1 AND source = 'online');`,
+          [merchantId],
+        );
+      }
       await this.dataSource.query(
         `DELETE FROM orders WHERE merchant_id = $1 AND source = 'online';`,
         [merchantId],
@@ -117,14 +131,18 @@ export class OnlineOrderSimulatorController {
       const maxId = remainingOrders[0]?.max_id;
       if (!maxId) {
         await this.dataSource.query(
-          `SELECT setval('online_order_id_seq', 1, false);
-           SELECT setval('online_order_item_id_seq', 1, false);`,
+          `SELECT setval('online_order_id_seq', 1, false);`,
+        );
+        await this.dataSource.query(
+          `SELECT setval('online_order_item_id_seq', 1, false);`,
         );
       } else {
         await this.dataSource.query(
-          `SELECT setval('online_order_id_seq', $1, true);
-           SELECT setval('online_order_item_id_seq', COALESCE((SELECT MAX(id) FROM online_order_item), 1), (SELECT MAX(id) FROM online_order_item) IS NOT NULL);`,
+          `SELECT setval('online_order_id_seq', $1, true);`,
           [maxId],
+        );
+        await this.dataSource.query(
+          `SELECT setval('online_order_item_id_seq', COALESCE((SELECT MAX(id) FROM online_order_item), 1), (SELECT MAX(id) FROM online_order_item) IS NOT NULL);`,
         );
       }
 
